@@ -15,7 +15,16 @@
       "codeLocation": "app/MyAgent1/",
       "runtimeVersion": "PYTHON_3_14",
       "networkMode": "PUBLIC",
-      "protocol": "HTTP"
+      "protocol": "HTTP",
+      "authorizerType": "CUSTOM_JWT",
+      "authorizerConfiguration": {
+        "customJwtAuthorizer": {
+          "discoveryUrl": "https://login.microsoftonline.com/61ce3eb4-4692-48a4-9af5-a63f5be45418/v2.0/.well-known/openid-configuration",
+          "allowedAudience": [
+            "12fc29c0-ad16-49b4-be9a-e4a5a91ef628"
+          ]
+        }
+      }
     }
   ],
   "memories": [],
