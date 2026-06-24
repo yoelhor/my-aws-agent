@@ -93,10 +93,37 @@ def _is_inline_function_call(event: dict) -> bool:
 
 
 
+def _extract_inbound_token(context: Any = None) -> str:
+    """
+    Extract the inbound user JWT from the `Authorization` header AgentCore forwards.
+
+    AgentCore delivers the validated user token in the `Authorization`
+    header (the runtime's `RequestHeaderAllowlist` includes `Authorization`).
+    The 'Bearer ' prefix is stripped so a raw JWT is ready for MSAL OBO.
+    """
+    raw = ""
+    headers = getattr(context, "request_headers", None) or {}
+    
+    for key, val in headers.items():
+        if isinstance(val, str) and val.strip() and key.lower() == "authorization":
+            raw = val.strip()
+            break
+
+    # MSAL acquire_token_on_behalf_of expects the raw JWT, not "Bearer {jwt}"
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+        log.info("****** Authorization header contains a Bearer token.")
+    else:
+        log.warning("****** Bearer token not found in Authorization header.")
+
+    return raw
+
 @app.entrypoint
 async def invoke(payload, context):
-    log.info("Invoking Agent.....")
+    log.info("****** Invoking Agent.....")
 
+    """ Get the bearer token from the inbound request."""
+    _current_token = _extract_inbound_token(context)
 
     agent = get_or_create_agent()
 

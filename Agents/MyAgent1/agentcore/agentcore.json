@@ -24,7 +24,10 @@
             "12fc29c0-ad16-49b4-be9a-e4a5a91ef628"
           ]
         }
-      }
+      },
+      "requestHeaderAllowlist": [
+        "Authorization"
+      ]
     }
   ],
   "memories": [],
