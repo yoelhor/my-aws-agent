@@ -1,3 +1,4 @@
+from logging import config
 from typing import Any
 from strands import Agent, tool
 import asyncio
@@ -129,17 +130,20 @@ async def invoke(payload, context):
     # MSAL OBO flow parameters
     # All configuration values are currently hard-coded for demonstration purposes 
     # and should be externalized before production use.
-    
+
     tenant_id = "61ce3eb4-4692-48a4-9af5-a63f5be45418" # Microsoft Entra tenant ID
     client_id = "12fc29c0-ad16-49b4-be9a-e4a5a91ef628"  # Agent Identity Blueprint ID
     client_secret = ""  # Agent Identity Blueprint secret
     agent_identity_id = "08920e81-610f-4260-b0d7-06595ead6d10"  # Agent identity ID (NOT the blueprint)
     scopes = ["api://80faa936-de73-4923-b2fa-8d38723cc4fc/mymcp.read"]  # Scopes for the downstream API
+    scopesForApp = ["api://80faa936-de73-4923-b2fa-8d38723cc4fc/.default"]  # Scopes for the downstream API (for client credentials flow)    
 
     # Acquire token on behalf of using MSAL
     obo_token = None
     if _inbound_user_token:
         try:
+
+            # Step 1: Initialize the MSAL ConfidentialClientApplication for the blueprint app
             _blueprint_app = msal.ConfidentialClientApplication(
                 client_id=client_id,
                 client_credential=client_secret,
@@ -160,14 +164,14 @@ async def invoke(payload, context):
                 log.error(f"****** Failed to acquire T1 token: {error_desc}")
 
 
-             # Step 2: Use the inbound token to acquire a token for the downstream API
+             # Step 2: Initialize the MSAL ConfidentialClientApplication for the agent identity
             _agent_app = msal.ConfidentialClientApplication(
                 client_id=agent_identity_id,
                 client_credential={"client_assertion": t1_result["access_token"]},
                 authority=f"https://login.microsoftonline.com/{tenant_id}"
             )
 
-           # Token acquisition on behalf of the user
+            # Step 2: Use the inbound token to acquire a token for the downstream API
             token_response = _agent_app.acquire_token_on_behalf_of(
                 user_assertion=_inbound_user_token,
                 scopes=scopes
@@ -176,13 +180,26 @@ async def invoke(payload, context):
             if "access_token" in token_response:
                 obo_token = token_response["access_token"]
                 log.info("****** Successfully acquired OBO token.")
+                log.info(f"****** OBO Token: {obo_token}")
             else:
                 error_desc = token_response.get("error_description", "Unknown error")
                 log.error(f"****** Failed to acquire OBO token: {error_desc}")
+
+            # Step 2: Token acquisition for the downstream API using client credentials flow (if needed)
+            autonomous_token_response = _agent_app.acquire_token_for_client(scopes=scopesForApp)
+
+            if "access_token" in autonomous_token_response:
+                autonomous_token = autonomous_token_response["access_token"]
+                log.info("****** Successfully acquired app token for downstream API.")
+                log.info(f"****** App Token: {autonomous_token}")
+            else:
+                error_desc = autonomous_token_response.get("error_description", "Unknown error")
+                log.error(f"****** Failed to acquire app token for downstream API: {error_desc}")
+
         except Exception as e:
-            log.error(f"****** Exception during OBO token acquisition: {str(e)}")
+            log.error(f"****** Exception during token acquisition: {str(e)}")
     else:
-        log.warning("****** No inbound token available for OBO flow.")
+        log.warning("****** No inbound token available for flow.")
 
     agent = get_or_create_agent()
 
