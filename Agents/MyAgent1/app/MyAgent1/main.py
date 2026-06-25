@@ -1,6 +1,7 @@
 from typing import Any
 from strands import Agent, tool
 import asyncio
+import msal
 from strands.agent.conversation_manager.null_conversation_manager import NullConversationManager
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
@@ -123,7 +124,65 @@ async def invoke(payload, context):
     log.info("****** Invoking Agent.....")
 
     """ Get the bearer token from the inbound request."""
-    _current_token = _extract_inbound_token(context)
+    _inbound_user_token = _extract_inbound_token(context)
+
+    # MSAL OBO flow parameters
+    # All configuration values are currently hard-coded for demonstration purposes 
+    # and should be externalized before production use.
+    
+    tenant_id = "61ce3eb4-4692-48a4-9af5-a63f5be45418" # Microsoft Entra tenant ID
+    client_id = "12fc29c0-ad16-49b4-be9a-e4a5a91ef628"  # Agent Identity Blueprint ID
+    client_secret = ""  # Agent Identity Blueprint secret
+    agent_identity_id = "08920e81-610f-4260-b0d7-06595ead6d10"  # Agent identity ID (NOT the blueprint)
+    scopes = ["api://80faa936-de73-4923-b2fa-8d38723cc4fc/mymcp.read"]  # Scopes for the downstream API
+
+    # Acquire token on behalf of using MSAL
+    obo_token = None
+    if _inbound_user_token:
+        try:
+            _blueprint_app = msal.ConfidentialClientApplication(
+                client_id=client_id,
+                client_credential=client_secret,
+                authority=f"https://login.microsoftonline.com/{tenant_id}"
+            )
+
+            # Step 1: Acquire a token for the blueprint app
+            t1_result = _blueprint_app.acquire_token_for_client(
+                scopes=["api://AzureADTokenExchange/.default"],
+                fmi_path=agent_identity_id,
+            )
+            
+            if "access_token" in t1_result:
+                t1_token = t1_result["access_token"]
+                log.info("****** Successfully acquired T1 token.")
+            else:
+                error_desc = t1_result.get("error_description", "Unknown error")
+                log.error(f"****** Failed to acquire T1 token: {error_desc}")
+
+
+             # Step 2: Use the inbound token to acquire a token for the downstream API
+            _agent_app = msal.ConfidentialClientApplication(
+                client_id=agent_identity_id,
+                client_credential={"client_assertion": t1_result["access_token"]},
+                authority=f"https://login.microsoftonline.com/{tenant_id}"
+            )
+
+           # Token acquisition on behalf of the user
+            token_response = _agent_app.acquire_token_on_behalf_of(
+                user_assertion=_inbound_user_token,
+                scopes=scopes
+            )
+
+            if "access_token" in token_response:
+                obo_token = token_response["access_token"]
+                log.info("****** Successfully acquired OBO token.")
+            else:
+                error_desc = token_response.get("error_description", "Unknown error")
+                log.error(f"****** Failed to acquire OBO token: {error_desc}")
+        except Exception as e:
+            log.error(f"****** Exception during OBO token acquisition: {str(e)}")
+    else:
+        log.warning("****** No inbound token available for OBO flow.")
 
     agent = get_or_create_agent()
 
